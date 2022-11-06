@@ -1,24 +1,31 @@
 // Original source code: https://wiki.keyestudio.com/KS0429_keyestudio_TDS_Meter_V1.0#Test_Code
 // Project details: https://RandomNerdTutorials.com/esp32-tds-water-quality-sensor/
 
+//Sensor Pins
 #define TdsSensorPin 27
 #define VREF 3.3              // analog reference voltage(Volt) of the ADC
 #define SCOUNT  30            // sum of sample point
-#define WaterLevelPin 28
+#define TrigPin 38            // ultrasonic pins
+#define EchoPin 39
 #define probePin 29           // to release voltage to the water level sensor
+
+//Constants
 #define uS_TO_S_FACTOR 1000000ULL  /* Conversion factor for micro seconds to seconds */
 #define TIME_TO_SLEEP  360        /* Time ESP32 will go to sleep (in seconds) */
-RTC_DATA_ATTR int bootCount = 0;
+//RTC_DATA_ATTR int bootCount = 0;
 
-int WaterLevelValue = 0;      //value from the water level sensor
-int level = 0;                //value of the water level
-int LEVELarray [6] = {1125,1245,1450,1720,2080,2630}; //array with level reference value to determine water level
+// Water Level Registers, store the distance value in the array
+int distanceBuffer[SCOUNT];      //distance values from water level sensor
+int distanceBufferIndex = 0;
 
-int analogBuffer[SCOUNT];     // store the analog value in the array, read from ADC
+// TDS Registers, store the analog value in the array, read from ADC
+int analogBuffer[SCOUNT];
 int analogBufferTemp[SCOUNT];
 int analogBufferIndex = 0;
 int copyIndex = 0;
 
+//Sensor Values
+int averageDistance = 0;
 float averageVoltage = 0;
 float tdsValue = 0;
 float temperature = 25;       // current temperature for compensation
@@ -47,23 +54,32 @@ int getMedianNum(int bArray[], int iFilterLen){
   return bTemp;
 }
 
-// water level measuring function
+// water level measuring function (using Ultrasonic Sensor)
 void measureWaterLevel(){
-  digitalWrite(probePin,HIGH);
-  delay(200);
-  WaterLevelValue = analogRead(WaterLevelPin);
-  for (int i = 0; i < 6 ; i++)
-    {
-      if ((WaterLevelValue > (LEVELarray[i] * 0.96)) && (WaterLevelValue < (LEVELarray[i] * 1.04)))              // allow a margin of 4% on the measured values to eliminate jitter and noise
-      {
-      level = i;
-      }  
-   digitalWrite(probePin, LOW);           // make probe low
-   Serial.print(" LEVELarray: "); Serial.print(level); Serial.print(" = "); Serial.print(LEVELarray[level]);Serial.print("   WaterLevelValue: "); Serial.print(WaterLevelValue); Serial.print("  Level: "); Serial.println(level);
-   // uncomment this code for determining the values to be put in the LEVELarray [] using the serial plotter and/or serial monitor or the ARDUINO IDE
-   }
+  static unsigned long distanceSampleTimepoint = millis();
+  // measure distance value
+  if(millis()-distanceSampleTimepoint > 400U){     //every 400 milliseconds,read the distance between sensor and water.
+    analogSampleTimepoint = millis();
+    distanceBuffer[distanceBufferIndex] = takeDistance();    //read the analog value and store into the buffer
+    distanceBufferIndex++;
+    if(distanceBufferIndex == SCOUNT){ 
+      distanceBufferIndex = 0;
+    }
+  }   
+  averageDistance = getMedianNum(distanceBuffer,SCOUNT);
+  Serial.println("Average water level:"); // water level debugging
+  Serial.print(averageDistance);
 }
 
+// read data from ultrasonic sensor
+int takeDistance(){
+  digitalWrite (TrigPin, HIGH);
+  delayMicroseconds (10);
+  digitalWrite (TrigPin, LOW);
+  int selang = pulseIn (EchoPin,HIGH);
+  int jarak = 0.0343 * (selang / 2);
+  return jarak;
+}
 //sleep function for ESP32
 void goingToSleep(){
   esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
@@ -90,7 +106,7 @@ void setup(){
   pinMode(TdsSensorPin,INPUT);
   pinMode(WaterLevelPin,INPUT);
   pinMode(probePin,OUTPUT);
-  print_wakeup_reason();
+  print_wakeup_reason(); //for debugging sleep function
 }
 
 void loop(){
