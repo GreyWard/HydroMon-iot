@@ -1,6 +1,12 @@
 // Original source code: https://wiki.keyestudio.com/KS0429_keyestudio_TDS_Meter_V1.0#Test_Code
 // Project details: https://RandomNerdTutorials.com/esp32-tds-water-quality-sensor/
 
+//Libraries
+#include "EEPROM.h"
+
+//Instantiate eeprom objects
+EEPROMClass BOTTOMDIST("eeprom0");
+
 //Sensor Pins
 #define TdsSensorPin 27
 #define VREF 3.3              // analog reference voltage(Volt) of the ADC
@@ -15,6 +21,8 @@
 //RTC_DATA_ATTR int bootCount = 0;
 
 // Water Level Registers, store the distance value in the array
+int bottomDistance = 0;
+int waterLevel = 0;
 int distanceBuffer[SCOUNT];      //distance values from water level sensor
 int distanceBufferIndex = 0;
 
@@ -25,7 +33,6 @@ int analogBufferIndex = 0;
 int copyIndex = 0;
 
 //Sensor Values
-int averageDistance = 0;
 float averageVoltage = 0;
 float tdsValue = 0;
 float temperature = 25;       // current temperature for compensation
@@ -55,7 +62,7 @@ int getMedianNum(int bArray[], int iFilterLen){
 }
 
 // water level measuring function (using Ultrasonic Sensor)
-void measureWaterLevel(){
+int measureWaterLevel(){
   static unsigned long distanceSampleTimepoint = millis();
   // measure distance value
   if(millis()-distanceSampleTimepoint > 400U){     //every 400 milliseconds,read the distance between sensor and water.
@@ -69,14 +76,15 @@ void measureWaterLevel(){
   averageDistance = getMedianNum(distanceBuffer,SCOUNT);
   Serial.println("Average water level:"); // water level debugging
   Serial.print(averageDistance);
+  return averageDistance;
 }
 
-// read data from ultrasonic sensor
+// read data from ultrasonic sensor, in centimeter
 int takeDistance(){
-  digitalWrite (TrigPin, HIGH);
-  delayMicroseconds (10);
-  digitalWrite (TrigPin, LOW);
-  int selang = pulseIn (EchoPin,HIGH);
+  digitalWrite(TrigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TrigPin, LOW);
+  int selang = pulseIn(EchoPin,HIGH);
   int jarak = 0.0343 * (selang / 2);
   return jarak;
 }
@@ -103,10 +111,24 @@ void print_wakeup_reason(){
 }
 void setup(){
   Serial.begin(115200);
-  pinMode(TdsSensorPin,INPUT);
-  pinMode(WaterLevelPin,INPUT);
-  pinMode(probePin,OUTPUT);
   print_wakeup_reason(); //for debugging sleep function
+  pinMode(TdsSensorPin,INPUT);
+  pinMode(EchoPin,INPUT);
+  pinMode(TrigPin,OUTPUT);
+  pinMode(probePin,OUTPUT);
+  //Starting EEPROMClass
+  if(!BOTTOMDIST.begin(0x500)){
+    Serial.println("Failed to initialize BOTTOMDIST");
+    Serial.println("Restarting");
+    delay(1000);
+    ESP.restart();
+  }
+  //Check the last measurement of bottom tank distance, if no data then save new one
+  BOTTOMDIST.get(0,bottomDistance);
+  if(bottomDistance == 0){
+    bottomDistance = measureWaterLevel();
+    BOTTOMDIST.put(0,bottomDistance);
+  }
 }
 
 void loop(){
@@ -148,7 +170,7 @@ void loop(){
   }
 
   //measure water level
-  measureWaterLevel();
+  waterLevel = bottomDistance - measureWaterLevel();
   //going to sleep
   //goingToSleep();
   
