@@ -25,6 +25,7 @@ int bottomDistance = 0;
 int waterLevel = 0;
 int distanceBuffer[SCOUNT];      //distance values from water level sensor
 int distanceBufferIndex = 0;
+int averageDistance = 0;
 
 // TDS Registers, store the analog value in the array, read from ADC
 int analogBuffer[SCOUNT];
