@@ -8,7 +8,7 @@
 EEPROMClass BOTTOMDIST("eeprom0");
 
 #define echoPin 2
-#define trigPin 3
+#define trigPin 4
 #define SCOUNT 30
 
 //Constants
@@ -53,6 +53,7 @@ int getMedianNum(int bArray[], int iFilterLen){
 
 // water level measuring function (using Ultrasonic Sensor)
 int measureWaterLevel(){
+  for ( int i ; i < SCOUNT ; i++){
   static unsigned long distanceSampleTimepoint = millis();
   // measure distance value
   if(millis()-distanceSampleTimepoint > 400U){     //every 400 milliseconds,read the distance between sensor and water.
@@ -62,6 +63,7 @@ int measureWaterLevel(){
     if(distanceBufferIndex == SCOUNT){ 
       distanceBufferIndex = 0;
     }
+  }
   }   
   averageDistance = getMedianNum(distanceBuffer,SCOUNT);
   Serial.println("Average water level:"); // water level debugging
@@ -103,6 +105,7 @@ void setup() {
   }
   Serial.print("Bottom distance: ");
   Serial.println(bottomDistance);
+  delay(3000);
 }
 
 void loop() {
@@ -110,5 +113,6 @@ void loop() {
   Serial.print("Water Level: ");
   Serial.print(waterLevel);
   Serial.println("cm");
+  delay(5000);
 
 }

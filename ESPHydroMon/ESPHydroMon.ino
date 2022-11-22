@@ -67,7 +67,7 @@ int measureWaterLevel(){
   static unsigned long distanceSampleTimepoint = millis();
   // measure distance value
   if(millis()-distanceSampleTimepoint > 400U){     //every 400 milliseconds,read the distance between sensor and water.
-    analogSampleTimepoint = millis();
+    distanceSampleTimepoint = millis();
     distanceBuffer[distanceBufferIndex] = takeDistance();    //read the analog value and store into the buffer
     distanceBufferIndex++;
     if(distanceBufferIndex == SCOUNT){ 
