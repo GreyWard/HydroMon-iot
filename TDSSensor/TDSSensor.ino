@@ -1,30 +1,16 @@
 // Original source code: https://wiki.keyestudio.com/KS0429_keyestudio_TDS_Meter_V1.0#Test_Code
 // Project details: https://RandomNerdTutorials.com/esp32-tds-water-quality-sensor/
 
-//Libraries
-#include "EEPROM.h"
-
-//Instantiate eeprom objects
-EEPROMClass BOTTOMDIST("eeprom0");
-
 //Sensor Pins
 #define TdsSensorPin 27
 #define VREF 3.3              // analog reference voltage(Volt) of the ADC
 #define SCOUNT  30            // sum of sample point
-#define TrigPin 38            // ultrasonic pins
-#define EchoPin 39
 #define probePin 29           // to release voltage to the water level sensor
 
 //Constants
 #define uS_TO_S_FACTOR 1000000ULL  /* Conversion factor for micro seconds to seconds */
 #define TIME_TO_SLEEP  360        /* Time ESP32 will go to sleep (in seconds) */
 //RTC_DATA_ATTR int bootCount = 0;
-
-// Water Level Registers, store the distance value in the array
-int bottomDistance = 0;
-int waterLevel = 0;
-int distanceBuffer[SCOUNT];      //distance values from water level sensor
-int distanceBufferIndex = 0;
 
 // TDS Registers, store the analog value in the array, read from ADC
 int analogBuffer[SCOUNT];
@@ -61,74 +47,10 @@ int getMedianNum(int bArray[], int iFilterLen){
   return bTemp;
 }
 
-// water level measuring function (using Ultrasonic Sensor)
-int measureWaterLevel(){
-  static unsigned long distanceSampleTimepoint = millis();
-  // measure distance value
-  if(millis()-distanceSampleTimepoint > 400U){     //every 400 milliseconds,read the distance between sensor and water.
-    analogSampleTimepoint = millis();
-    distanceBuffer[distanceBufferIndex] = takeDistance();    //read the analog value and store into the buffer
-    distanceBufferIndex++;
-    if(distanceBufferIndex == SCOUNT){ 
-      distanceBufferIndex = 0;
-    }
-  }   
-  averageDistance = getMedianNum(distanceBuffer,SCOUNT);
-  Serial.println("Average water level:"); // water level debugging
-  Serial.print(averageDistance);
-  return averageDistance;
-}
-
-// read data from ultrasonic sensor, in centimeter
-int takeDistance(){
-  digitalWrite(TrigPin, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(TrigPin, LOW);
-  int selang = pulseIn(EchoPin,HIGH);
-  int jarak = 0.0343 * (selang / 2);
-  return jarak;
-}
-//sleep function for ESP32
-void goingToSleep(){
-  esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
-  Serial.println("Going to Sleep");
-  Serial.flush();
-  esp_deep_sleep_start(); //code starting from here wont be run
-}
-//wakeup func
-void print_wakeup_reason(){
-  esp_sleep_wakeup_cause_t wakeup_reason;
-  wakeup_reason = esp_sleep_get_wakeup_cause();
-  switch(wakeup_reason)
-  {
-    case ESP_SLEEP_WAKEUP_EXT0 : Serial.println("Wakeup caused by external signal using RTC_IO"); break;
-    case ESP_SLEEP_WAKEUP_EXT1 : Serial.println("Wakeup caused by external signal using RTC_CNTL"); break;
-    case ESP_SLEEP_WAKEUP_TIMER : Serial.println("Wakeup caused by timer"); break;
-    case ESP_SLEEP_WAKEUP_TOUCHPAD : Serial.println("Wakeup caused by touchpad"); break;
-    case ESP_SLEEP_WAKEUP_ULP : Serial.println("Wakeup caused by ULP program"); break;
-    default : Serial.printf("Wakeup was not caused by deep sleep: %d\n",wakeup_reason); break;
-  }
-}
 void setup(){
   Serial.begin(115200);
-  print_wakeup_reason(); //for debugging sleep function
   pinMode(TdsSensorPin,INPUT);
-  pinMode(EchoPin,INPUT);
-  pinMode(TrigPin,OUTPUT);
   pinMode(probePin,OUTPUT);
-  //Starting EEPROMClass
-  if(!BOTTOMDIST.begin(0x500)){
-    Serial.println("Failed to initialize BOTTOMDIST");
-    Serial.println("Restarting");
-    delay(1000);
-    ESP.restart();
-  }
-  //Check the last measurement of bottom tank distance, if no data then save new one
-  BOTTOMDIST.get(0,bottomDistance);
-  if(bottomDistance == 0){
-    bottomDistance = measureWaterLevel();
-    BOTTOMDIST.put(0,bottomDistance);
-  }
 }
 
 void loop(){
@@ -167,11 +89,5 @@ void loop(){
       Serial.print(tdsValue,0);
       Serial.println("ppm");
     }
-  }
-
-  //measure water level
-  waterLevel = bottomDistance - measureWaterLevel();
-  //going to sleep
-  //goingToSleep();
-  
+  }  
 }
