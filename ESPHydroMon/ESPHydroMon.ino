@@ -18,28 +18,30 @@
 
 /* Device Credentials */
 // Insert Firebase project API Key
-#define API_KEY "AIzaSyBpbe1_pyHkzX388NJrgHt9bxuNMCtUct8"
+#define API_KEY "AIzaSyC5sUXHZKiEUR9CL6PI54x314pI8AE3BXI"
 
 // Insert RTDB URL
-#define DATABASE_URL "https://hydromon-f29cc-default-rtdb.asia-southeast1.firebasedatabase.app/" 
+#define DATABASE_URL "https://hydromon-backend-default-rtdb.asia-southeast1.firebasedatabase.app/" 
 
 // Insert your network credentials
 #define WIFI_SSID "Yak"
 #define WIFI_PASSWORD "Blue@231"
 
 // Defining Pins
-#define echoPin 34
-#define trigPin 35
+#define echoPin 18
+#define trigPin 19
 #define resetPin 14
-#define TdsSensorPin 27
-#define probePin 29 
+#define TdsSensorPin 13
+#define probePin 12
 
 // Constants
 #define EEPROM_SIZE 1
 #define uS_TO_S_FACTOR 1000000ULL  /* Conversion factor for micro seconds to seconds */
-#define TIME_TO_SLEEP  360        /* Time ESP32 will go to sleep (in seconds) */
+#define TIME_TO_SLEEP  43200        /* Time ESP32 will go to sleep (in seconds) */
 #define VREF 3.3              /* analog reference voltage(Volt) of the ADC */
 #define SCOUNT  30            /* sum of sample point */
+#define USER_EMAIL "hydromontest1@gmail.com"
+#define USER_PASSWORD "password"
 //RTC_DATA_ATTR int bootCount = 0;
 
 //Global Variables
@@ -52,6 +54,8 @@ float temperature = 25;       // current temperature for compensation
 // Water Level variables, store the distance value in the array
 int bottomDistance = 0;
 int waterLevel = 0;
+bool nextReset = false;
+bool buttonRelease = false;
 
 // TDS Registers, store the analog value in the array, read from ADC
 int analogBuffer[SCOUNT];
@@ -63,6 +67,7 @@ int copyIndex = 0;
 FirebaseData fbdo;
 FirebaseAuth auth;
 FirebaseConfig config;
+String uid;
 unsigned long sendDataPrevMillis = 0;
 int count = 0;
 bool signupOK = false;
@@ -73,7 +78,7 @@ bool signupOK = false;
  * return none
  */
 void goingToSleep(){
-  esp_sleep_enable_ext0_wakeup(GPIO_NUM_14,1); //1 = High, 0 = Low
+  esp_sleep_enable_ext0_wakeup(GPIO_NUM_14,0); //1 = High, 0 = Low
   esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
   Serial.println("Going to Sleep");
   Serial.flush();
@@ -87,7 +92,11 @@ void print_wakeup_reason(){
   wakeup_reason = esp_sleep_get_wakeup_cause();
   switch(wakeup_reason)
   {
-    case ESP_SLEEP_WAKEUP_EXT0 : Serial.println("Wakeup caused by external signal using RTC_IO"); break;
+    case ESP_SLEEP_WAKEUP_EXT0 : 
+    Serial.println("Wakeup caused by external signal using RTC_IO"); 
+    //if Reset button pressed then it will go Reset State
+    nextReset = true;
+    break;
     case ESP_SLEEP_WAKEUP_TIMER : Serial.println("Wakeup caused by timer"); break;
     default : Serial.printf("Wakeup was caused by other: %d\n",wakeup_reason); break;
   }
@@ -111,17 +120,31 @@ void firebase_init(){
   config.api_key = API_KEY;
   /* Assign the RTDB URL (required) */
   config.database_url = DATABASE_URL;
-  /* Sign up */
-  if (Firebase.signUp(&config, &auth, "f617fb2ded7eb9a85da9e53ad1a8224d2acff01196b9e6075931d1e8099164a5anon.com", "")){
+  /* Log In */
+  auth.user.email = USER_EMAIL;
+  auth.user.password = USER_PASSWORD;
+
+/*  if (Firebase.signUp(&config, &auth, "f617fb2ded7eb9a85da9e53ad1a8224d2acff01196b9e6075931d1e8099164a5anon.com", "")){
     Serial.println("ok");
     signupOK = true;
   }
   else{
     Serial.printf("%s\n", config.signer.signupError.message.c_str());
-  }
+  }*/
   /* Assign the callback function for the long running token generation task */
   config.token_status_callback = tokenStatusCallback; //see addons/TokenHelper.h
+   // Assign the maximum retry of token generation
+  config.max_token_generation_retry = 5;
   Firebase.begin(&config, &auth);
+  // Getting the user UID might take a few seconds
+  Serial.println("Getting User UID");
+  while ((auth.token.uid) == "") {
+    Serial.print('.');
+    delay(1000);
+  }
+  uid = auth.token.uid.c_str();
+  Serial.print("User UID: ");
+  Serial.println(uid);
   Firebase.reconnectWiFi(true);
 }
 /* Send data to Firebase
@@ -130,10 +153,11 @@ void firebase_init(){
  * @param level(float)
  */
 void send_firebase(int tds, float level){
-  if (Firebase.ready() && signupOK && (millis() - sendDataPrevMillis > 15000 || sendDataPrevMillis == 0)){
+  if (Firebase.ready() && (millis() - sendDataPrevMillis > 15000 || sendDataPrevMillis == 0)){
     sendDataPrevMillis = millis();
+    String path = uid + "/data/tds";
     // Write an Int number on the database path test/int
-    if (Firebase.RTDB.setInt(&fbdo, "data/tds", tds)){
+    if (Firebase.RTDB.setInt(&fbdo, path, tds)){
       Serial.println("PASSED");
       Serial.println("PATH: " + fbdo.dataPath());
       Serial.println("TYPE: " + fbdo.dataType());
@@ -143,9 +167,10 @@ void send_firebase(int tds, float level){
       Serial.println("REASON: " + fbdo.errorReason());
     }
     count++;
-    
+    path = uid;
+    path += "/data/level";
     // Write an Float number on the database path test/float
-    if (Firebase.RTDB.setFloat(&fbdo, "data/level", 0.01 + level)){
+    if (Firebase.RTDB.setFloat(&fbdo, path, 0.01 + level)){
       Serial.println("PASSED");
       Serial.println("PATH: " + fbdo.dataPath());
       Serial.println("TYPE: " + fbdo.dataType());
@@ -173,7 +198,7 @@ void send_firebase(int tds, float level){
     bottomDistance = takeDistance();
     EEPROM.write(0,bottomDistance);
     EEPROM.commit();
-    Serial.print("Put new Bottom Distance: ");
+    Serial.print("Put new Bottom Distance (no memory content found): ");
     Serial.println(bottomDistance);
   } else {
     Serial.print("Taken Bottom Distance: ");
@@ -230,14 +255,13 @@ int takeDistance(){
 }
 
 void setup(){
-  Serial.begin(115200);
+  Serial.begin(9600);
   print_wakeup_reason(); //for debugging sleep function
   pinMode(TdsSensorPin,INPUT);
   pinMode(probePin,OUTPUT);
   pinMode(trigPin, OUTPUT);
   pinMode(echoPin, INPUT);
   pinMode(resetPin, INPUT_PULLUP);
-  Serial.begin(9600);
   Serial.println("Ultrasonic Sensor Test");
   //Starting EEPROM
   eeprom_init();
@@ -248,57 +272,68 @@ void setup(){
 void loop(){
   static unsigned long analogSampleTimepoint = millis();
   // when the reset button pressed, take new bottom distance
-  if (!digitalRead(resetPin)){
-    bottomDistance = takeDistance();
-    EEPROM.write(0,bottomDistance);
-    EEPROM.commit();
-    Serial.print("Put new Bottom Distance: ");
-    Serial.println(bottomDistance);
+  bool button = digitalRead(resetPin);
+  if (button && !buttonRelease){
+    buttonRelease = true;
   }
-  // measure ppm
-  if(millis()-analogSampleTimepoint > 40U){     //every 40 milliseconds,read the analog value from the ADC
-    analogSampleTimepoint = millis();
-    analogBuffer[analogBufferIndex] = analogRead(TdsSensorPin);    //read the analog value and store into the buffer
-    analogBufferIndex++;
-    if(analogBufferIndex == SCOUNT){ 
-      analogBufferIndex = 0;
-    }
+  else if (!button && buttonRelease){
+    nextReset = (!nextReset);
   }
-  // after 30 tds value measurements
-  static unsigned long printTimepoint = millis();
-  if(millis()-printTimepoint > 800U){
-    printTimepoint = millis();
-    for(copyIndex=0; copyIndex<SCOUNT; copyIndex++){
-      analogBufferTemp[copyIndex] = analogBuffer[copyIndex];
-      
-      // read the analog value more stable by the median filtering algorithm, and convert to voltage value
-      averageVoltage = getMedianNum(analogBufferTemp,SCOUNT) * (float)VREF / 4096.0;
-      
-      //temperature compensation formula: fFinalResult(25^C) = fFinalResult(current)/(1.0+0.02*(fTP-25.0)); 
-      float compensationCoefficient = 1.0+0.02*(temperature-25.0);
-      
-      //temperature compensation
-      float compensationVoltage=averageVoltage/compensationCoefficient;
-      
-      //convert voltage value to tds value
-      tdsValue=(133.42*compensationVoltage*compensationVoltage*compensationVoltage - 255.86*compensationVoltage*compensationVoltage + 857.39*compensationVoltage)*0.5;
-      
-      Serial.print("TDS Value:");
-      Serial.print(tdsValue,0);
-      Serial.println("ppm");
+  if (!nextReset){
+    // measure 
+    if(millis()-analogSampleTimepoint > 40U){     //every 40 milliseconds,read the analog value from the ADC
+      analogSampleTimepoint = millis();
+      analogBuffer[analogBufferIndex] = analogRead(TdsSensorPin);    //read the analog value and store into the buffer
+      analogBufferIndex++;
+      if(analogBufferIndex == SCOUNT){ 
+        analogBufferIndex = 0;
+      }
     }
-
-  //measure water level
-  waterLevel = bottomDistance - takeDistance();
-  //the result
-  Serial.print("Water Level: ");
-  Serial.println(waterLevel);
-  Serial.print("Taken Bottom Distance: ");
-  Serial.println(bottomDistance);
+    // after 30 tds value measurements
+    static unsigned long printTimepoint = millis();
+    if(millis()-printTimepoint > 1200U){
+      printTimepoint = millis();
+      for(copyIndex=0; copyIndex<SCOUNT; copyIndex++){
+        analogBufferTemp[copyIndex] = analogBuffer[copyIndex];
+        
+        // read the analog value more stable by the median filtering algorithm, and convert to voltage value
+        averageVoltage = getMedianNum(analogBufferTemp,SCOUNT) * (float)VREF / 4096.0;
+        
+        //temperature compensation formula: fFinalResult(25^C) = fFinalResult(current)/(1.0+0.02*(fTP-25.0)); 
+        float compensationCoefficient = 1.0+0.02*(temperature-25.0);
+        
+        //temperature compensation
+        float compensationVoltage=averageVoltage/compensationCoefficient;
+        
+        //convert voltage value to tds value
+        tdsValue=(133.42*compensationVoltage*compensationVoltage*compensationVoltage - 255.86*compensationVoltage*compensationVoltage + 857.39*compensationVoltage)*0.5;
+        
+        Serial.print("TDS Value:");
+        Serial.print(tdsValue,0);
+        Serial.println("ppm");
+      }
+    
+      //measure water level
+      waterLevel = bottomDistance - takeDistance();
+      //the result
+      Serial.print("Water Level: ");
+      Serial.println(waterLevel);
+      Serial.print("Taken Bottom Distance: ");
+      Serial.println(bottomDistance);
+      
+      // send data to firebase
+      send_firebase(tdsValue,waterLevel);
   
-  // send data to firebase
-  send_firebase(tdsValue,waterLevel);
-  // going to sleep
-  goingToSleep();
+      // going to sleep
+      goingToSleep();
+    }
   }
+  else if(nextReset){
+   bottomDistance = takeDistance();
+   EEPROM.write(0,bottomDistance);
+   EEPROM.commit();
+   Serial.print("Put new Bottom Distance (Reset Pressed): ");
+   Serial.println(bottomDistance);
+   delay(1000);
+ }
 }
