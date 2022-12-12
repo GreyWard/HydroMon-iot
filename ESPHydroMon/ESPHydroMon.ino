@@ -11,6 +11,7 @@
 #include "EEPROM.h"
 #include <WiFi.h>
 #include <Firebase_ESP_Client.h>
+#include "time.h"
 //Provide the token generation process info.
 #include "addons/TokenHelper.h"
 //Provide the RTDB payload printing info and other helper functions.
@@ -24,8 +25,8 @@
 #define DATABASE_URL "https://hydromon-backend-default-rtdb.asia-southeast1.firebasedatabase.app/" 
 
 // Insert your network credentials
-#define WIFI_SSID "Yak"
-#define WIFI_PASSWORD "Blue@231"
+#define WIFI_SSID "Hayo"
+#define WIFI_PASSWORD "mikeh123"
 
 // Defining Pins
 #define echoPin 18
@@ -67,10 +68,27 @@ int copyIndex = 0;
 FirebaseData fbdo;
 FirebaseAuth auth;
 FirebaseConfig config;
+FirebaseJson json;
+int timestamp;
 String uid;
 unsigned long sendDataPrevMillis = 0;
-int count = 0;
+//int count = 0;
 bool signupOK = false;
+
+//database paths
+String databasePath;
+String tdsPath = "/tds";
+String levelPath = "/level";
+String timePath = "/timestamp";
+
+//Parent node
+String parentPath;
+
+//NTP Server to request epoch time
+const char* ntpServer = "pool.ntp.org";
+
+//Variable to save current epoch time
+unsigned long epochTime;
 
 /* sleep function for ESP32
  * can be woke up by interrupt pin (14) or time until 1 hour
@@ -152,33 +170,18 @@ void firebase_init(){
  * @param tds(int)
  * @param level(float)
  */
-void send_firebase(int tds, float level){
+void send_firebase(int tds, float level, long epochTime){
   if (Firebase.ready() && (millis() - sendDataPrevMillis > 15000 || sendDataPrevMillis == 0)){
     sendDataPrevMillis = millis();
-    String path = uid + "/data/tds";
-    // Write an Int number on the database path test/int
-    if (Firebase.RTDB.setInt(&fbdo, path, tds)){
-      Serial.println("PASSED");
-      Serial.println("PATH: " + fbdo.dataPath());
-      Serial.println("TYPE: " + fbdo.dataType());
-    }
-    else {
-      Serial.println("FAILED");
-      Serial.println("REASON: " + fbdo.errorReason());
-    }
-    count++;
-    path = uid;
-    path += "/data/level";
-    // Write an Float number on the database path test/float
-    if (Firebase.RTDB.setFloat(&fbdo, path, 0.01 + level)){
-      Serial.println("PASSED");
-      Serial.println("PATH: " + fbdo.dataPath());
-      Serial.println("TYPE: " + fbdo.dataType());
-    }
-    else {
-      Serial.println("FAILED");
-      Serial.println("REASON: " + fbdo.errorReason());
-    }
+    databasePath = uid + "/data";
+    timestamp = getTime();
+    Serial.print("time: ");
+    Serial.println(timestamp);
+
+    json.set(tdsPath.c_str(), String(tds));
+    json.set(levelPath.c_str(), String(level));
+    json.set(timePath.c_str(), String (timestamp));
+    Serial.printf("Set json... %s\n", Firebase.RTDB.setJSON(&fbdo, databasePath.c_str(), &json) ? "ok" : fbdo.errorReason().c_str());
   }
 }
 /* EEPROM initialization
@@ -205,6 +208,19 @@ void send_firebase(int tds, float level){
     Serial.println(bottomDistance);
   }
  }
+
+//Function to fetch epoch time fron NTP Server
+unsigned long getTime(){
+  time_t now;
+  struct tm timeinfo;
+  if(!getLocalTime(&timeinfo)){
+    Serial.println("Failed to obtain time");
+    return(0);
+  }
+  time(&now);
+  return now;
+}
+ 
 /* median filtering algorithm
  * to get representative data from 30 measurements
  * @param bArray[](int)
@@ -267,6 +283,8 @@ void setup(){
   eeprom_init();
   //Starting Firebase connection
   firebase_init();
+  //init time
+  configTime(0,0,ntpServer);
 }
 
 void loop(){
@@ -293,8 +311,9 @@ void loop(){
     static unsigned long printTimepoint = millis();
     if(millis()-printTimepoint > 1200U){
       printTimepoint = millis();
+      //mo dicoba tambahin buat distance
       for(copyIndex=0; copyIndex<SCOUNT; copyIndex++){
-        analogBufferTemp[copyIndex] = analogBuffer[copyIndex];
+        analogBufferTemp[copyIndex] = analogBuffer[copyIndex];}
         
         // read the analog value more stable by the median filtering algorithm, and convert to voltage value
         averageVoltage = getMedianNum(analogBufferTemp,SCOUNT) * (float)VREF / 4096.0;
@@ -311,7 +330,7 @@ void loop(){
         Serial.print("TDS Value:");
         Serial.print(tdsValue,0);
         Serial.println("ppm");
-      }
+      
     
       //measure water level
       waterLevel = bottomDistance - takeDistance();
@@ -320,9 +339,14 @@ void loop(){
       Serial.println(waterLevel);
       Serial.print("Taken Bottom Distance: ");
       Serial.println(bottomDistance);
+
+      //get time
+      epochTime = getTime();
+      Serial.print("Epoch Time: ");
+      Serial.println(epochTime);
       
       // send data to firebase
-      send_firebase(tdsValue,waterLevel);
+      send_firebase(tdsValue,waterLevel, epochTime);
   
       // going to sleep
       goingToSleep();
