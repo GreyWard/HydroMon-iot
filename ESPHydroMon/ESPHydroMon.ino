@@ -299,8 +299,16 @@ void loop(){
     Serial.println(analogBuffer[analogBufferIndex]);
   }
   // when the reset button pressed, take new bottom distance
-  bool button = digitalRead(resetPin);
-  if (button && !buttonRelease){
+  if (!digitalRead(resetPin)&& !buttonRelease){
+    bottomDistance = takeDistance();
+    EEPROM.write(0,bottomDistance);
+    EEPROM.commit();
+    Serial.print("Put new Bottom Distance: ");
+    Serial.println(bottomDistance);
+    resetState = true;
+    buttonRelease = false;
+  }
+  else if (digitalRead(resetPin) && !buttonRelease){
     buttonRelease = true;
   }
   else if (!button && buttonRelease){
