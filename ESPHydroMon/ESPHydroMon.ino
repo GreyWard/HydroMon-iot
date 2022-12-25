@@ -31,16 +31,16 @@
 // Defining Pins
 #define echoPin 18
 #define trigPin 19
-#define resetPin 14
-#define TdsSensorPin 13
+#define resetPin 23
+#define TdsSensorPin 5
 #define probePin 12
 
 // Constants
 #define EEPROM_SIZE 1
 #define uS_TO_S_FACTOR 1000000ULL  /* Conversion factor for micro seconds to seconds */
-#define TIME_TO_SLEEP  43200        /* Time ESP32 will go to sleep (in seconds) */
+#define TIME_TO_SLEEP  21600        /* Time ESP32 will go to sleep (in seconds) */
 #define VREF 3.3              /* analog reference voltage(Volt) of the ADC */
-#define SCOUNT  30            /* sum of sample point */
+#define SCOUNT  10            /* sum of sample point */
 #define USER_EMAIL "hydromontest1@gmail.com"
 #define USER_PASSWORD "password"
 //RTC_DATA_ATTR int bootCount = 0;
@@ -77,9 +77,6 @@ bool signupOK = false;
 
 //database paths
 String databasePath;
-String tdsPath = "/tds";
-String levelPath = "/level";
-String timePath = "/timestamp";
 
 //Parent node
 String parentPath;
@@ -89,6 +86,27 @@ const char* ntpServer = "pool.ntp.org";
 
 //Variable to save current epoch time
 unsigned long epochTime;
+
+/* read data from ultrasonic sensor, in centimeter
+ * @return distance(int)
+ */
+int takeDistance(){
+  //clear trigPin
+  digitalWrite(trigPin,LOW);
+  delayMicroseconds(2);
+  
+  //Set trigPin to High in 10 microsecs
+  digitalWrite(trigPin,HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+  
+  //read the echo
+  duration = pulseIn(echoPin,HIGH);
+  
+  //calculate distance
+  distance = duration * 0.034 / 2;
+  return distance;
+}
 
 /* sleep function for ESP32
  * can be woke up by interrupt pin (14) or time until 1 hour
@@ -170,17 +188,19 @@ void firebase_init(){
  * @param tds(int)
  * @param level(float)
  */
-void send_firebase(int tds, float level, long epochTime){
+void send_firebase(int tds, float level,unsigned long epochTime){
+  Serial.println("Started to send_firebase");
   if (Firebase.ready() && (millis() - sendDataPrevMillis > 15000 || sendDataPrevMillis == 0)){
+    Serial.println("Firebase ready and parsing the json");
     sendDataPrevMillis = millis();
     databasePath = uid + "/data";
-    timestamp = getTime();
-    Serial.print("time: ");
-    Serial.println(timestamp);
-
-    json.set(tdsPath.c_str(), String(tds));
-    json.set(levelPath.c_str(), String(level));
-    json.set(timePath.c_str(), String (timestamp));
+    Serial.println("parsing tds");
+    json.set("/tds", String(tds));
+    Serial.println("parsing level");
+    json.set("/level", String(level));
+    Serial.println("parsing time");
+    json.set("/timestamp", String (epochTime));
+    Serial.println("send data");
     Serial.printf("Set json... %s\n", Firebase.RTDB.setJSON(&fbdo, databasePath.c_str(), &json) ? "ok" : fbdo.errorReason().c_str());
   }
 }
@@ -249,29 +269,8 @@ int getMedianNum(int bArray[], int iFilterLen){
   return bTemp;
 }
 
-/* read data from ultrasonic sensor, in centimeter
- * @return distance(int)
- */
-int takeDistance(){
-  //clear trigPin
-  digitalWrite(trigPin,LOW);
-  delayMicroseconds(2);
-  
-  //Set trigPin to High in 10 microsecs
-  digitalWrite(trigPin,HIGH);
-  delayMicroseconds(10);
-  digitalWrite(trigPin, LOW);
-  
-  //read the echo
-  duration = pulseIn(echoPin,HIGH);
-  
-  //calculate distance
-  distance = duration * 0.034 / 2;
-  return distance;
-}
-
 void setup(){
-  Serial.begin(9600);
+  Serial.begin(115200);
   print_wakeup_reason(); //for debugging sleep function
   pinMode(TdsSensorPin,INPUT);
   pinMode(probePin,OUTPUT);
@@ -289,6 +288,16 @@ void setup(){
 
 void loop(){
   static unsigned long analogSampleTimepoint = millis();
+  // measure ppm
+  if(millis()-analogSampleTimepoint > 40U){     //every 40 milliseconds,read the analog value from the ADC
+    analogSampleTimepoint = millis();
+    analogBuffer[analogBufferIndex] = analogRead(TdsSensorPin);    //read the analog value and store into the buffer
+    analogBufferIndex++;
+    if(analogBufferIndex == SCOUNT){ 
+      analogBufferIndex = 0;
+    }
+    Serial.println(analogBuffer[analogBufferIndex]);
+  }
   // when the reset button pressed, take new bottom distance
   bool button = digitalRead(resetPin);
   if (button && !buttonRelease){
@@ -298,39 +307,30 @@ void loop(){
     nextReset = (!nextReset);
   }
   if (!nextReset){
-    // measure 
-    if(millis()-analogSampleTimepoint > 40U){     //every 40 milliseconds,read the analog value from the ADC
-      analogSampleTimepoint = millis();
-      analogBuffer[analogBufferIndex] = analogRead(TdsSensorPin);    //read the analog value and store into the buffer
-      analogBufferIndex++;
-      if(analogBufferIndex == SCOUNT){ 
-        analogBufferIndex = 0;
-      }
-    }
+    static unsigned long printSampleTimepoint = millis();
+    if(millis()-printSampleTimepoint > 1600U){
+      printSampleTimepoint = millis();
     // after 30 tds value measurements
-    static unsigned long printTimepoint = millis();
-    if(millis()-printTimepoint > 1200U){
-      printTimepoint = millis();
-      //mo dicoba tambahin buat distance
-      for(copyIndex=0; copyIndex<SCOUNT; copyIndex++){
-        analogBufferTemp[copyIndex] = analogBuffer[copyIndex];}
-        
-        // read the analog value more stable by the median filtering algorithm, and convert to voltage value
-        averageVoltage = getMedianNum(analogBufferTemp,SCOUNT) * (float)VREF / 4096.0;
-        
-        //temperature compensation formula: fFinalResult(25^C) = fFinalResult(current)/(1.0+0.02*(fTP-25.0)); 
-        float compensationCoefficient = 1.0+0.02*(temperature-25.0);
-        
-        //temperature compensation
-        float compensationVoltage=averageVoltage/compensationCoefficient;
-        
-        //convert voltage value to tds value
-        tdsValue=(133.42*compensationVoltage*compensationVoltage*compensationVoltage - 255.86*compensationVoltage*compensationVoltage + 857.39*compensationVoltage)*0.5;
-        
-        Serial.print("TDS Value:");
-        Serial.print(tdsValue,0);
-        Serial.println("ppm");
+      for(copyIndex=0; copyIndex<100; copyIndex++){
+      analogBufferTemp[copyIndex] = analogBuffer[copyIndex];
+      }
       
+      // read the analog value more stable by the median filtering algorithm, and convert to voltage value
+      averageVoltage = getMedianNum(analogBufferTemp,SCOUNT) * (float)VREF / 4096.0;
+      
+      //temperature compensation formula: fFinalResult(25^C) = fFinalResult(current)/(1.0+0.02*(fTP-25.0)); 
+      float compensationCoefficient = 1.0+0.02*(temperature-25.0);
+      
+      //temperature compensation
+      float compensationVoltage=averageVoltage/compensationCoefficient;
+      
+      //convert voltage value to tds value
+      tdsValue=(133.42*compensationVoltage*compensationVoltage*compensationVoltage - 255.86*compensationVoltage*compensationVoltage + 857.39*compensationVoltage)*0.5;
+      tdsValue = analogRead(TdsSensorPin);
+      Serial.print("TDS Value:");
+      Serial.print(tdsValue,0);
+      Serial.println("ppm");
+    
     
       //measure water level
       waterLevel = bottomDistance - takeDistance();
