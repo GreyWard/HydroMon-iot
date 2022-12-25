@@ -32,13 +32,8 @@
 #define echoPin 18
 #define trigPin 19
 #define resetPin 14
-<<<<<<< HEAD
-#define TdsSensorPin 27
-#define probePin 26 
-=======
 #define TdsSensorPin 13
 #define probePin 12
->>>>>>> dd99fc873227d3a3c280c1dbc94f8a3a291df045
 
 // Constants
 #define EEPROM_SIZE 1
@@ -60,11 +55,7 @@ float temperature = 25;       // current temperature for compensation
 // Water Level variables, store the distance value in the array
 int bottomDistance = 0;
 int waterLevel = 0;
-<<<<<<< HEAD
-bool resetState = false;
-=======
 bool nextReset = false;
->>>>>>> dd99fc873227d3a3c280c1dbc94f8a3a291df045
 bool buttonRelease = false;
 
 // TDS Registers, store the analog value in the array, read from ADC
@@ -105,11 +96,7 @@ unsigned long epochTime;
  * return none
  */
 void goingToSleep(){
-<<<<<<< HEAD
-  //esp_sleep_enable_ext0_wakeup(GPIO_NUM_33,1); //1 = High, 0 = Low
-=======
   esp_sleep_enable_ext0_wakeup(GPIO_NUM_14,0); //1 = High, 0 = Low
->>>>>>> dd99fc873227d3a3c280c1dbc94f8a3a291df045
   esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
   Serial.println("Going to Sleep");
   Serial.flush();
@@ -303,7 +290,6 @@ void setup(){
 void loop(){
   static unsigned long analogSampleTimepoint = millis();
   // when the reset button pressed, take new bottom distance
-<<<<<<< HEAD
   if (!digitalRead(resetPin)&& !buttonRelease){
     bottomDistance = takeDistance();
     EEPROM.write(0,bottomDistance);
@@ -320,17 +306,6 @@ void loop(){
     resetState = false;
     buttonRelease = false;
     // measure ppm
-=======
-  bool button = digitalRead(resetPin);
-  if (button && !buttonRelease){
-    buttonRelease = true;
-  }
-  else if (!button && buttonRelease){
-    nextReset = (!nextReset);
-  }
-  if (!nextReset){
-    // measure 
->>>>>>> dd99fc873227d3a3c280c1dbc94f8a3a291df045
     if(millis()-analogSampleTimepoint > 40U){     //every 40 milliseconds,read the analog value from the ADC
       analogSampleTimepoint = millis();
       analogBuffer[analogBufferIndex] = analogRead(TdsSensorPin);    //read the analog value and store into the buffer
@@ -343,14 +318,8 @@ void loop(){
     static unsigned long printTimepoint = millis();
     if(millis()-printTimepoint > 1200U){
       printTimepoint = millis();
-<<<<<<< HEAD
       for(copyIndex=0; copyIndex<SCOUNT; copyIndex++){
         analogBufferTemp[copyIndex] = analogBuffer[copyIndex];
-=======
-      //mo dicoba tambahin buat distance
-      for(copyIndex=0; copyIndex<SCOUNT; copyIndex++){
-        analogBufferTemp[copyIndex] = analogBuffer[copyIndex];}
->>>>>>> dd99fc873227d3a3c280c1dbc94f8a3a291df045
         
         // read the analog value more stable by the median filtering algorithm, and convert to voltage value
         averageVoltage = getMedianNum(analogBufferTemp,SCOUNT) * (float)VREF / 4096.0;
@@ -367,22 +336,6 @@ void loop(){
         Serial.print("TDS Value:");
         Serial.print(tdsValue,0);
         Serial.println("ppm");
-<<<<<<< HEAD
-      }
-  
-    //measure water level
-    waterLevel = bottomDistance - takeDistance();
-    //the result
-    Serial.print("Water Level: ");
-    Serial.println(waterLevel);
-    Serial.print("Taken Bottom Distance: ");
-    Serial.println(bottomDistance);
-    
-    // send data to firebase
-    send_firebase(tdsValue,waterLevel);
-    // going to sleep
-    goingToSleep();
-=======
       
     
       //measure water level
@@ -403,7 +356,6 @@ void loop(){
   
       // going to sleep
       goingToSleep();
->>>>>>> dd99fc873227d3a3c280c1dbc94f8a3a291df045
     }
   }
   else if(nextReset){
