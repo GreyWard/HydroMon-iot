@@ -32,12 +32,12 @@
 #define trigPin 35
 #define resetPin 14
 #define TdsSensorPin 27
-#define probePin 29 
+#define probePin 26 
 
 // Constants
 #define EEPROM_SIZE 1
 #define uS_TO_S_FACTOR 1000000ULL  /* Conversion factor for micro seconds to seconds */
-#define TIME_TO_SLEEP  360        /* Time ESP32 will go to sleep (in seconds) */
+#define TIME_TO_SLEEP  43200        /* Time ESP32 will go to sleep (in seconds) */
 #define VREF 3.3              /* analog reference voltage(Volt) of the ADC */
 #define SCOUNT  30            /* sum of sample point */
 //RTC_DATA_ATTR int bootCount = 0;
@@ -52,6 +52,8 @@ float temperature = 25;       // current temperature for compensation
 // Water Level variables, store the distance value in the array
 int bottomDistance = 0;
 int waterLevel = 0;
+bool resetState = false;
+bool buttonRelease = false;
 
 // TDS Registers, store the analog value in the array, read from ADC
 int analogBuffer[SCOUNT];
@@ -73,7 +75,7 @@ bool signupOK = false;
  * return none
  */
 void goingToSleep(){
-  esp_sleep_enable_ext0_wakeup(GPIO_NUM_14,1); //1 = High, 0 = Low
+  //esp_sleep_enable_ext0_wakeup(GPIO_NUM_33,1); //1 = High, 0 = Low
   esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
   Serial.println("Going to Sleep");
   Serial.flush();
@@ -230,14 +232,13 @@ int takeDistance(){
 }
 
 void setup(){
-  Serial.begin(115200);
+  Serial.begin(9600);
   print_wakeup_reason(); //for debugging sleep function
   pinMode(TdsSensorPin,INPUT);
   pinMode(probePin,OUTPUT);
   pinMode(trigPin, OUTPUT);
   pinMode(echoPin, INPUT);
   pinMode(resetPin, INPUT_PULLUP);
-  Serial.begin(9600);
   Serial.println("Ultrasonic Sensor Test");
   //Starting EEPROM
   eeprom_init();
@@ -248,57 +249,66 @@ void setup(){
 void loop(){
   static unsigned long analogSampleTimepoint = millis();
   // when the reset button pressed, take new bottom distance
-  if (!digitalRead(resetPin)){
+  if (!digitalRead(resetPin)&& !buttonRelease){
     bottomDistance = takeDistance();
     EEPROM.write(0,bottomDistance);
     EEPROM.commit();
     Serial.print("Put new Bottom Distance: ");
     Serial.println(bottomDistance);
+    resetState = true;
+    buttonRelease = false;
   }
-  // measure ppm
-  if(millis()-analogSampleTimepoint > 40U){     //every 40 milliseconds,read the analog value from the ADC
-    analogSampleTimepoint = millis();
-    analogBuffer[analogBufferIndex] = analogRead(TdsSensorPin);    //read the analog value and store into the buffer
-    analogBufferIndex++;
-    if(analogBufferIndex == SCOUNT){ 
-      analogBufferIndex = 0;
-    }
+  else if (digitalRead(resetPin) && !buttonRelease){
+    buttonRelease = true;
   }
-  // after 30 tds value measurements
-  static unsigned long printTimepoint = millis();
-  if(millis()-printTimepoint > 800U){
-    printTimepoint = millis();
-    for(copyIndex=0; copyIndex<SCOUNT; copyIndex++){
-      analogBufferTemp[copyIndex] = analogBuffer[copyIndex];
-      
-      // read the analog value more stable by the median filtering algorithm, and convert to voltage value
-      averageVoltage = getMedianNum(analogBufferTemp,SCOUNT) * (float)VREF / 4096.0;
-      
-      //temperature compensation formula: fFinalResult(25^C) = fFinalResult(current)/(1.0+0.02*(fTP-25.0)); 
-      float compensationCoefficient = 1.0+0.02*(temperature-25.0);
-      
-      //temperature compensation
-      float compensationVoltage=averageVoltage/compensationCoefficient;
-      
-      //convert voltage value to tds value
-      tdsValue=(133.42*compensationVoltage*compensationVoltage*compensationVoltage - 255.86*compensationVoltage*compensationVoltage + 857.39*compensationVoltage)*0.5;
-      
-      Serial.print("TDS Value:");
-      Serial.print(tdsValue,0);
-      Serial.println("ppm");
+  else if ((!digitalRead(resetPin) && buttonRelease) || !resetState){
+    resetState = false;
+    buttonRelease = false;
+    // measure ppm
+    if(millis()-analogSampleTimepoint > 40U){     //every 40 milliseconds,read the analog value from the ADC
+      analogSampleTimepoint = millis();
+      analogBuffer[analogBufferIndex] = analogRead(TdsSensorPin);    //read the analog value and store into the buffer
+      analogBufferIndex++;
+      if(analogBufferIndex == SCOUNT){ 
+        analogBufferIndex = 0;
+      }
     }
-
-  //measure water level
-  waterLevel = bottomDistance - takeDistance();
-  //the result
-  Serial.print("Water Level: ");
-  Serial.println(waterLevel);
-  Serial.print("Taken Bottom Distance: ");
-  Serial.println(bottomDistance);
+    // after 30 tds value measurements
+    static unsigned long printTimepoint = millis();
+    if(millis()-printTimepoint > 1200U){
+      printTimepoint = millis();
+      for(copyIndex=0; copyIndex<SCOUNT; copyIndex++){
+        analogBufferTemp[copyIndex] = analogBuffer[copyIndex];
+        
+        // read the analog value more stable by the median filtering algorithm, and convert to voltage value
+        averageVoltage = getMedianNum(analogBufferTemp,SCOUNT) * (float)VREF / 4096.0;
+        
+        //temperature compensation formula: fFinalResult(25^C) = fFinalResult(current)/(1.0+0.02*(fTP-25.0)); 
+        float compensationCoefficient = 1.0+0.02*(temperature-25.0);
+        
+        //temperature compensation
+        float compensationVoltage=averageVoltage/compensationCoefficient;
+        
+        //convert voltage value to tds value
+        tdsValue=(133.42*compensationVoltage*compensationVoltage*compensationVoltage - 255.86*compensationVoltage*compensationVoltage + 857.39*compensationVoltage)*0.5;
+        
+        Serial.print("TDS Value:");
+        Serial.print(tdsValue,0);
+        Serial.println("ppm");
+      }
   
-  // send data to firebase
-  send_firebase(tdsValue,waterLevel);
-  // going to sleep
-  goingToSleep();
+    //measure water level
+    waterLevel = bottomDistance - takeDistance();
+    //the result
+    Serial.print("Water Level: ");
+    Serial.println(waterLevel);
+    Serial.print("Taken Bottom Distance: ");
+    Serial.println(bottomDistance);
+    
+    // send data to firebase
+    send_firebase(tdsValue,waterLevel);
+    // going to sleep
+    goingToSleep();
+    }
   }
 }
