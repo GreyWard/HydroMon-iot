@@ -43,6 +43,9 @@ int tdsValue = 0;
 int bottomDistance = 200;
 int waterLevel = 0;
 
+//Controller
+String callibrate = "0";
+
 int takeDistance(){
   //clear trigPin
   digitalWrite(trigPin,LOW);
@@ -73,9 +76,9 @@ void postData() {
 
   if (httpCode > 0) {
     // check the status code
-    String response = http.getString(); // get the response payload
+    callibrate = http.getString(); // get the response payload
     Serial.println(httpCode); // print the status code
-    Serial.println(response); // print the response payload
+    Serial.println(callibrate); // print the response payload
   } else {
     Serial.println("Error: " + http.errorToString(httpCode));
   }
@@ -91,9 +94,15 @@ void dataProcess() {
   Serial.print("TDS:");
   Serial.println(tdsValue); 
   //read water level
-  waterLevel = bottomDistance - takeDistance();
-  Serial.print("Water Level: ");
-  Serial.println(waterLevel);
+  if (callibrate == "1"){
+    bottomDistance = takeDistance();
+    Serial.print("Taking bottom level: ");
+    Serial.println(bottomDistance);
+  }else{
+    waterLevel = bottomDistance - takeDistance();
+    Serial.print("Water Level: ");
+    Serial.println(waterLevel);
+  }
   postData();
   ec.calibration(voltage,temperature);
 }
@@ -104,8 +113,8 @@ void setup(){
   pinMode(trigPin, OUTPUT);
   pinMode(echoPin, INPUT);
   Serial.println("Connecting");
+  WiFi.mode(WIFI_STA);
   WiFi.begin(AP_SSID,AP_PASS);
-  Serial.println("Connecting");
   while(WiFi.status() != WL_CONNECTED){
     delay(500);
     Serial.print(".");
