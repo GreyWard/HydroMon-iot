@@ -16,19 +16,30 @@ AsyncWebServer server(80);
 #define AP_PASS "Bas3b@ll"
 
 BlynkTimer timer;
-
+int n = 2;
+IPAddress savedIP[2];
+IPAddress tempIP;
 int tds = 0;
 int water = 0;
-String measure = "0";
+String callibrate = "0";
 //send the data
 void dataProcess() {
-  Blynk.virtualWrite(V0,tds);
-  Blynk.virtualWrite(V1,water);
+  int i = 0;
+  for (i = 0; i<n;i++){
+      if(savedIP[i] == tempIP){
+        break;
+      }
+      else if(i+1 == n){
+        savedIP[i] = tempIP;
+      }
+    }
+  Blynk.virtualWrite(i,tds);
+  Blynk.virtualWrite((i+1),water);
 }
 //Reset Button Called from Blynk, only for debugging
 BLYNK_WRITE(V2){
-  measure = param.asString();
-  Serial.println(measure);
+  callibrate = param.asString();
+  Serial.println(callibrate);
 }
 
 void setup() {
@@ -44,10 +55,11 @@ void setup() {
   server.on("/post", HTTP_POST, [](AsyncWebServerRequest *request) {
     // Handle POST request
     // Read POST data
+    tempIP = request->client()->remoteIP();
     tds = request->getParam("tds",true)->value().toInt();
     water = request->getParam("water",true)->value().toInt();
     Serial.printf("Fetched data: tds = %d, water = %d\n",tds,water);
-    request->send(200);
+    request->send(200,"post/String",callibrate);
   });
   server.begin();
   Serial.println("Waiting a client connection to notify...");
